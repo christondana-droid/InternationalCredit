@@ -438,10 +438,8 @@ function updateDashboardUI(data) {
             });
         }
 
-        // Re-setup event listeners with a slight delay to ensure DOM is updated
-        setTimeout(() => {
-            window.setupCustomDropdowns();
-        }, 50);
+        // Re-setup event listeners immediately after DOM injection
+        window.setupCustomDropdowns();
     }
 
     // Update Transactions

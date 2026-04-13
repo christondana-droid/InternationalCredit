@@ -1,3 +1,5 @@
 node_modules/
 .env
+env.txt
+cookies.txt
 .DS_Store
