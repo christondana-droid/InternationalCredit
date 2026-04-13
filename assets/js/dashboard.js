@@ -140,8 +140,16 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Fetch Real Data
-    fetchDashboardData();
+    // Initial Data Load
+    if (window.__INITIAL_DATA__) {
+        // Data was injected by the server, use it immediately
+        updateDashboardUI(window.__INITIAL_DATA__);
+        // Clean up to prevent using stale data on subsequent navigations (if this were a SPA)
+        delete window.__INITIAL_DATA__; 
+    } else {
+        // Fallback for direct access or errors: fetch data as before
+        fetchDashboardData();
+    }
 
     // Poll for new notifications/data every 10 seconds
     setInterval(fetchDashboardData, 10000);

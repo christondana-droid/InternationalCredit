@@ -3,6 +3,7 @@ const express = require('express');
 const session = require('express-session');
 const PgSession = require('connect-pg-simple')(session);
 const path = require('path');
+const fs = require('fs').promises;
 const bcrypt = require('bcryptjs');
 const { pool: db, initDb } = require('./database');
 
@@ -43,49 +44,61 @@ app.get('/', (req, res) => {
 });
 
 // Login Route
-app.post('/login', (req, res) => {
+app.post('/login', async (req, res) => {
     let { username, password } = req.body;
     if (username) username = username.trim(); // Remove accidental whitespace
     console.log(`Login attempt for: '${username}'`);
 
-    db.query('SELECT * FROM users WHERE username = $1', [username], (err, result) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
+    try {
+        const result = await db.query('SELECT * FROM users WHERE username = $1', [username]);
         if (result.rows.length === 0) return res.status(401).json({ error: 'User not found' });
 
         const user = result.rows[0];
-        // Compare hashed password
-        bcrypt.compare(password, user.password, (err, result) => {
-            if (result) {
-                if (user.status === 'suspended') {
-                    return res.status(403).json({ error: 'Account suspended. Contact support.' });
-                }
-                // 'blocked' users are allowed to login (view-only access)
+        const match = await bcrypt.compare(password, user.password);
 
-                req.session.userId = user.id;
-                req.session.username = user.username; // Or user.full_name
-                req.session.role = user.role || 'user';
-                
-                if (user.role === 'admin') {
-                    res.json({ success: true, redirect: '/admin' });
-                } else {
-                    res.json({ success: true, redirect: '/dashboard' });
-                }
-            } else {
-                res.status(401).json({ error: 'Invalid password' });
+        if (match) {
+            if (user.status === 'suspended') {
+                return res.status(403).json({ error: 'Account suspended. Contact support.' });
             }
-        });
-    });
+            // 'blocked' users are allowed to login (view-only access)
+
+            req.session.userId = user.id;
+            req.session.username = user.username;
+            req.session.role = user.role || 'user';
+            
+            if (user.role === 'admin') {
+                res.json({ success: true, redirect: '/admin' });
+            } else {
+                res.json({ success: true, redirect: '/dashboard' });
+            }
+        } else {
+            res.status(401).json({ error: 'Invalid password' });
+        }
+    } catch (err) {
+        console.error('Login error:', err);
+        res.status(500).json({ error: 'Database error' });
+    }
 });
 
 // Dashboard Route (Protected)
-app.get('/dashboard', (req, res) => {
+app.get('/dashboard', async (req, res) => {
     if (!req.session.userId) {
         return res.redirect('/');
     }
     if (req.session.role === 'admin') {
         return res.redirect('/admin');
     }
-    res.sendFile(path.join(__dirname, 'dashboard.html'));
+    try {
+        const initialData = await getDashboardData(req.session.userId);
+        const dashboardHtmlPath = path.join(__dirname, 'dashboard.html');
+        let html = await fs.readFile(dashboardHtmlPath, 'utf-8');
+        const script = `<script>window.__INITIAL_DATA__ = ${JSON.stringify(initialData)}</script>`;
+        html = html.replace('</head>', `${script}</head>`);
+        res.send(html);
+    } catch (err) {
+        console.error('Error preparing dashboard:', err);
+        res.status(500).send('Could not load dashboard. Please try again later.');
+    }
 });
 
 // Admin Dashboard Route
@@ -96,6 +109,66 @@ app.get('/admin', (req, res) => {
     res.sendFile(path.join(__dirname, 'admin-dashboard.html'));
 });
 
+async function getDashboardData(userId) {
+    // This function encapsulates the logic to fetch all necessary dashboard data.
+    // It can be called by both the initial page load and the polling API.
+
+    // Fetch User Details
+    const userRes = await db.query('SELECT full_name, email, phone FROM users WHERE id = $1', [userId]);
+    const user = userRes.rows[0];
+
+    // Fetch Accounts
+    const accountsRes = await db.query('SELECT * FROM accounts WHERE user_id = $1', [userId]);
+    const accounts = accountsRes.rows;
+
+    // Calculate Net Worth
+    const netWorth = accounts.reduce((sum, acc) => sum + parseFloat(acc.balance), 0);
+
+    // Fetch Recent Transactions (Limit 5)
+    // Joining with accounts to ensure we only get transactions for this user's accounts
+    const transactionsRes = await db.query(`
+        SELECT t.*, a.account_name 
+        FROM transactions t
+        JOIN accounts a ON t.account_id = a.id
+        WHERE a.user_id = $1
+        ORDER BY t.date DESC LIMIT 5
+    `, [userId]);
+
+    // Fetch External Accounts
+    const extAccountsRes = await db.query('SELECT * FROM external_accounts WHERE user_id = $1', [userId]);
+
+    // Fetch Notifications
+    const notificationsRes = await db.query('SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC', [userId]);
+
+    // Fetch Recipients
+    const recipientsRes = await db.query('SELECT * FROM recipients WHERE user_id = $1 ORDER BY name ASC', [userId]);
+
+    // Fetch Spending Last 7 Days
+    const spendingRes = await db.query(`
+        SELECT DATE(t.date) as date, SUM(t.amount) as total
+        FROM transactions t
+        JOIN accounts a ON t.account_id = a.id
+        WHERE a.user_id = $1 AND t.type = 'Debit' AND t.date >= CURRENT_DATE - INTERVAL '6 days'
+        GROUP BY DATE(t.date)
+        ORDER BY DATE(t.date)
+    `, [userId]);
+
+    // Fetch Savings Goals
+    const savingsGoalsRes = await db.query('SELECT * FROM savings_goals WHERE user_id = $1 ORDER BY created_at DESC', [userId]);
+
+    return {
+        user: user,
+        netWorth: netWorth,
+        accounts: accounts,
+        transactions: transactionsRes.rows,
+        externalAccounts: extAccountsRes.rows,
+        notifications: notificationsRes.rows,
+        recipients: recipientsRes.rows,
+        spending: spendingRes.rows,
+        savingsGoals: savingsGoalsRes.rows
+    };
+}
+
 // API: Get Dashboard Data
 app.get('/api/dashboard-data', async (req, res) => {
     if (!req.session.userId) {
@@ -103,62 +176,8 @@ app.get('/api/dashboard-data', async (req, res) => {
     }
 
     try {
-        const userId = req.session.userId;
-
-        // Fetch User Details
-        const userRes = await db.query('SELECT full_name, email, phone FROM users WHERE id = $1', [userId]);
-        const user = userRes.rows[0];
-
-        // Fetch Accounts
-        const accountsRes = await db.query('SELECT * FROM accounts WHERE user_id = $1', [userId]);
-        const accounts = accountsRes.rows;
-
-        // Calculate Net Worth
-        const netWorth = accounts.reduce((sum, acc) => sum + parseFloat(acc.balance), 0);
-
-        // Fetch Recent Transactions (Limit 5)
-        // Joining with accounts to ensure we only get transactions for this user's accounts
-        const transactionsRes = await db.query(`
-            SELECT t.*, a.account_name 
-            FROM transactions t
-            JOIN accounts a ON t.account_id = a.id
-            WHERE a.user_id = $1
-            ORDER BY t.date DESC LIMIT 5
-        `, [userId]);
-
-        // Fetch External Accounts
-        const extAccountsRes = await db.query('SELECT * FROM external_accounts WHERE user_id = $1', [userId]);
-
-        // Fetch Notifications
-        const notificationsRes = await db.query('SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC', [userId]);
-
-        // Fetch Recipients
-        const recipientsRes = await db.query('SELECT * FROM recipients WHERE user_id = $1 ORDER BY name ASC', [userId]);
-
-        // Fetch Spending Last 7 Days
-        const spendingRes = await db.query(`
-            SELECT DATE(t.date) as date, SUM(t.amount) as total
-            FROM transactions t
-            JOIN accounts a ON t.account_id = a.id
-            WHERE a.user_id = $1 AND t.type = 'Debit' AND t.date >= CURRENT_DATE - INTERVAL '6 days'
-            GROUP BY DATE(t.date)
-            ORDER BY DATE(t.date)
-        `, [userId]);
-
-        // Fetch Savings Goals
-        const savingsGoalsRes = await db.query('SELECT * FROM savings_goals WHERE user_id = $1 ORDER BY created_at DESC', [userId]);
-
-        res.json({
-            user: user,
-            netWorth: netWorth,
-            accounts: accounts,
-            transactions: transactionsRes.rows,
-            externalAccounts: extAccountsRes.rows,
-            notifications: notificationsRes.rows,
-            recipients: recipientsRes.rows,
-            spending: spendingRes.rows,
-            savingsGoals: savingsGoalsRes.rows
-        });
+        const data = await getDashboardData(req.session.userId);
+        res.json(data);
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Server error' });
@@ -209,24 +228,29 @@ app.post('/api/transfer', async (req, res) => {
     const fromId = parseInt(fromAccountId);
     const toId = parseInt(toAccountId);
 
+    const client = await db.connect();
     try {
-        // Simple transaction logic (In production, use BEGIN/COMMIT)
+        await client.query('BEGIN');
+
         // 1. Deduct from source
-        await db.query('UPDATE accounts SET balance = balance - $1 WHERE id = $2', [transferAmount, fromId]);
+        await client.query('UPDATE accounts SET balance = balance - $1 WHERE id = $2', [transferAmount, fromId]);
         // 2. Add to destination
-        await db.query('UPDATE accounts SET balance = balance + $1 WHERE id = $2', [transferAmount, toId]);
+        await client.query('UPDATE accounts SET balance = balance + $1 WHERE id = $2', [transferAmount, toId]);
         
         // 3. Log transactions
-        await db.query("INSERT INTO transactions (account_id, type, description, amount) VALUES ($1, 'Debit', 'Transfer Out', $2)", [fromId, transferAmount]);
-        await db.query("INSERT INTO transactions (account_id, type, description, amount) VALUES ($1, 'Credit', 'Transfer In', $2)", [toId, transferAmount]);
+        await client.query("INSERT INTO transactions (account_id, type, description, amount) VALUES ($1, 'Debit', 'Transfer Out', $2)", [fromId, transferAmount]);
+        await client.query("INSERT INTO transactions (account_id, type, description, amount) VALUES ($1, 'Credit', 'Transfer In', $2)", [toId, transferAmount]);
 
-        // Create Notification
-        await db.query("INSERT INTO notifications (user_id, message) VALUES ($1, $2)", [req.session.userId, `Transfer of $${transferAmount.toFixed(2)} successful.`]);
+        await client.query("INSERT INTO notifications (user_id, message) VALUES ($1, $2)", [req.session.userId, `Transfer of $${transferAmount.toFixed(2)} successful.`]);
 
+        await client.query('COMMIT');
         res.json({ success: true, message: 'Transfer successful' });
     } catch (err) {
+        await client.query('ROLLBACK');
         console.error(err);
         res.status(500).json({ error: 'Transfer failed' });
+    } finally {
+        client.release();
     }
 });
 
@@ -247,25 +271,35 @@ app.post('/api/zelle', async (req, res) => {
     const { recipient, amount } = req.body;
     const userId = req.session.userId;
 
+    const client = await db.connect();
     try {
+        await client.query('BEGIN');
+
         // Get primary checking account (simplified)
-        const accRes = await db.query("SELECT id FROM accounts WHERE user_id = $1 AND type = 'Checking' LIMIT 1", [userId]);
-        if (accRes.rows.length === 0) return res.status(400).json({ error: 'No checking account found' });
+        const accRes = await client.query("SELECT id FROM accounts WHERE user_id = $1 AND type = 'Checking' LIMIT 1", [userId]);
+        if (accRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'No checking account found' });
+        }
         
         const accountId = accRes.rows[0].id;
         const sendAmount = parseFloat(amount);
 
         // Deduct and Log
-        await db.query('UPDATE accounts SET balance = balance - $1 WHERE id = $2', [sendAmount, accountId]);
-        await db.query("INSERT INTO transactions (account_id, type, description, amount) VALUES ($1, 'Debit', $2, $3)", [accountId, `Zelle to ${recipient}`, sendAmount]);
+        await client.query('UPDATE accounts SET balance = balance - $1 WHERE id = $2', [sendAmount, accountId]);
+        await client.query("INSERT INTO transactions (account_id, type, description, amount) VALUES ($1, 'Debit', $2, $3)", [accountId, `Zelle to ${recipient}`, sendAmount]);
 
         // Create Notification
-        await db.query("INSERT INTO notifications (user_id, message) VALUES ($1, $2)", [req.session.userId, `Zelle payment of $${sendAmount.toFixed(2)} to ${recipient} sent.`]);
+        await client.query("INSERT INTO notifications (user_id, message) VALUES ($1, $2)", [req.session.userId, `Zelle payment of $${sendAmount.toFixed(2)} to ${recipient} sent.`]);
 
+        await client.query('COMMIT');
         res.json({ success: true, message: `Sent $${sendAmount} to ${recipient}` });
     } catch (err) {
+        await client.query('ROLLBACK');
         console.error(err);
         res.status(500).json({ error: 'Payment failed' });
+    } finally {
+        client.release();
     }
 });
 
@@ -482,19 +516,24 @@ app.use((err, req, res, next) => {
 
 if (require.main === module) {
     const startServer = async () => {
-        await initDb(); // Wait for the database to be ready
+        try {
+            await initDb(); // Wait for the database to be ready
 
-        const server = app.listen(PORT, () => {
-            console.log(`Server is running on http://localhost:${PORT}`);
-        });
+            const server = app.listen(PORT, () => {
+                console.log(`Server is running on http://localhost:${PORT}`);
+            });
 
-        server.on('error', (err) => {
-            if (err.code === 'EADDRINUSE') {
-                console.error(`\nError: Port ${PORT} is already in use.`);
-            } else {
-                console.error('An unexpected error occurred:', err);
-            }
-        });
+            server.on('error', (err) => {
+                if (err.code === 'EADDRINUSE') {
+                    console.error(`\nError: Port ${PORT} is already in use.`);
+                } else {
+                    console.error('An unexpected error occurred:', err);
+                }
+            });
+        } catch (err) {
+            console.error('FATAL: Could not connect to the database. Server shutting down.');
+            process.exit(1);
+        }
     };
 
     startServer();

@@ -212,6 +212,7 @@ const initDb = async () => {
         client.release();
     } catch (err) {
         console.error('Database initialization error:', err);
+        throw err; // Re-throw to prevent the server from starting in a broken state
     }
 };
 

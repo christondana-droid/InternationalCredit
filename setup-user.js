@@ -7,11 +7,11 @@ const setupUser = async () => {
         console.log('Starting user setup...');
         
         // User data
-        const username = 'jharrison';
-        const password = 'America@123';
-        const fullName = 'Joseph Harrison';
-        const email = 'JosephHarrison@gmail.com';
-        const phone = '7037697003';
+        const username = 'Eares';
+        const password = 'Justelisme123$';
+        const fullName = 'Elis Ares';
+        const email = 'elisares@yahoo.com';
+        const phone = '501-031-3409';
         
         // Check if user already exists and delete if so
         console.log('Checking if user already exists...');
@@ -45,88 +45,48 @@ const setupUser = async () => {
         console.log('Creating Checking Account...');
         const checkingRes = await db.query(
             'INSERT INTO accounts (user_id, account_name, account_number, type, balance) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-            [userId, 'Checking Account', '157525054662', 'Checking', 1800500.00]
+            [userId, 'Checking Account', '157525054771', 'Checking', 390000.00]
         );
         const checkingAccountId = checkingRes.rows[0].id;
         console.log(`Checking Account created with ID: ${checkingAccountId}`);
         
-        // Create Savings Account
-        console.log('Creating Savings Account...');
-        const savingsRes = await db.query(
-            'INSERT INTO accounts (user_id, account_name, account_number, type, balance) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-            [userId, 'Savings Account', '157525054664', 'Savings', 212071800.00]
-        );
-        const savingsAccountId = savingsRes.rows[0].id;
-        console.log(`Savings Account created with ID: ${savingsAccountId}`);
-        
-        // Create transaction history for Checking Account
+        // Create transaction history for Checking Account with specific dates
         console.log('Creating transaction history for Checking Account...');
         const checkingTransactions = [
-            { type: 'Credit', description: 'Direct Deposit - Payroll', amount: 5000.00, daysAgo: 35 },
-            { type: 'Credit', description: 'Direct Deposit - Payroll', amount: 5000.00, daysAgo: 28 },
-            { type: 'Credit', description: 'Direct Deposit - Payroll', amount: 5000.00, daysAgo: 21 },
-            { type: 'Credit', description: 'Direct Deposit - Payroll', amount: 5000.00, daysAgo: 14 },
-            { type: 'Credit', description: 'Direct Deposit - Payroll', amount: 5000.00, daysAgo: 7 },
-            { type: 'Debit', description: 'Starbucks Coffee', amount: 6.50, daysAgo: 33 },
-            { type: 'Debit', description: 'Amazon Purchase', amount: 127.99, daysAgo: 30 },
-            { type: 'Debit', description: 'Walmart Grocery', amount: 89.47, daysAgo: 25 },
-            { type: 'Debit', description: 'Gas Station', amount: 45.00, daysAgo: 20 },
-            { type: 'Debit', description: 'Restaurant Dinner', amount: 67.82, daysAgo: 15 },
-            { type: 'Debit', description: 'Netflix Subscription', amount: 15.99, daysAgo: 10 },
-            { type: 'Credit', description: 'Zelle Transfer from Friend', amount: 200.00, daysAgo: 12 },
-            { type: 'Debit', description: 'Transfer to Savings', amount: 1000.00, daysAgo: 5 },
-            { type: 'Debit', description: 'ATM Withdrawal', amount: 200.00, daysAgo: 3 },
-            { type: 'Credit', description: 'Refund - Electronics Return', amount: 299.99, daysAgo: 2 },
-            { type: 'Debit', description: 'Insurance Payment', amount: 150.00, daysAgo: 1 },
+            { 
+                type: 'Credit', 
+                description: 'DEPOSIT', 
+                amount: 350000.00, 
+                date: new Date('2025-03-02')  // March 2, 2025
+            },
+            { 
+                type: 'Credit', 
+                description: 'INTEREST DEPOSIT', 
+                amount: 14000.00, 
+                date: new Date('2021-02-02')  // February 2, 2021
+            },
+            { 
+                type: 'Credit', 
+                description: 'INTEREST DEPOSIT', 
+                amount: 15000.00, 
+                date: new Date('2022-04-10')  // April 10, 2022
+            },
+            { 
+                type: 'Credit', 
+                description: 'INTEREST DEPOSIT', 
+                amount: 11000.00, 
+                date: new Date('2023-07-04')  // July 4, 2023
+            }
         ];
         
         for (const trans of checkingTransactions) {
-            const date = new Date();
-            date.setDate(date.getDate() - trans.daysAgo);
             await db.query(
                 'INSERT INTO transactions (account_id, type, description, amount, date) VALUES ($1, $2, $3, $4, $5)',
-                [checkingAccountId, trans.type, trans.description, trans.amount, date]
+                [checkingAccountId, trans.type, trans.description, trans.amount, trans.date]
             );
         }
         console.log(`Created ${checkingTransactions.length} transactions for Checking Account`);
-        
-        // Create transaction history for Savings Account
-        console.log('Creating transaction history for Savings Account...');
-        const savingsTransactions = [
-            { type: 'Credit', description: 'Initial Deposit', amount: 100000.00, daysAgo: 365 },
-            { type: 'Credit', description: 'Monthly Transfer from Checking', amount: 5000.00, daysAgo: 358 },
-            { type: 'Credit', description: 'Monthly Transfer from Checking', amount: 5000.00, daysAgo: 330 },
-            { type: 'Credit', description: 'Monthly Transfer from Checking', amount: 5000.00, daysAgo: 300 },
-            { type: 'Credit', description: 'Monthly Transfer from Checking', amount: 5000.00, daysAgo: 270 },
-            { type: 'Credit', description: 'Monthly Transfer from Checking', amount: 5000.00, daysAgo: 240 },
-            { type: 'Credit', description: 'Monthly Transfer from Checking', amount: 5000.00, daysAgo: 210 },
-            { type: 'Credit', description: 'Monthly Transfer from Checking', amount: 5000.00, daysAgo: 180 },
-            { type: 'Credit', description: 'Monthly Transfer from Checking', amount: 5000.00, daysAgo: 150 },
-            { type: 'Credit', description: 'Monthly Transfer from Checking', amount: 5000.00, daysAgo: 120 },
-            { type: 'Credit', description: 'Monthly Transfer from Checking', amount: 5000.00, daysAgo: 90 },
-            { type: 'Credit', description: 'Monthly Transfer from Checking', amount: 5000.00, daysAgo: 60 },
-            { type: 'Credit', description: 'Monthly Transfer from Checking', amount: 5000.00, daysAgo: 30 },
-            { type: 'Credit', description: 'Interest Payment (Monthly)', amount: 450.00, daysAgo: 25 },
-            { type: 'Credit', description: 'Interest Payment (Monthly)', amount: 450.00, daysAgo: 55 },
-            { type: 'Credit', description: 'Interest Payment (Monthly)', amount: 450.00, daysAgo: 85 },
-            { type: 'Credit', description: 'Interest Payment (Monthly)', amount: 450.00, daysAgo: 115 },
-            { type: 'Credit', description: 'Interest Payment (Monthly)', amount: 450.00, daysAgo: 145 },
-            { type: 'Credit', description: 'Bonus - Year End Savings', amount: 10000.00, daysAgo: 45 },
-            { type: 'Debit', description: 'Emergency Withdrawal', amount: 50000.00, daysAgo: 38 },
-            { type: 'Credit', description: 'Replenishment Transfer', amount: 50000.00, daysAgo: 35 },
-            { type: 'Credit', description: 'Investment Returns Deposit', amount: 2071800.00, daysAgo: 10 },
-        ];
-        
-        for (const trans of savingsTransactions) {
-            const date = new Date();
-            date.setDate(date.getDate() - trans.daysAgo);
-            await db.query(
-                'INSERT INTO transactions (account_id, type, description, amount, date) VALUES ($1, $2, $3, $4, $5)',
-                [savingsAccountId, trans.type, trans.description, trans.amount, date]
-            );
-        }
-        console.log(`Created ${savingsTransactions.length} transactions for Savings Account`);
-        
+
         // Verify password
         console.log('\nVerifying password...');
         const verifyUser = await db.query('SELECT password FROM users WHERE id = $1', [userId]);
@@ -143,9 +103,11 @@ const setupUser = async () => {
         console.log(`  Email: ${email}`);
         console.log(`  Phone: ${phone}`);
         console.log(`\nAccounts Created:`);
-        console.log(`  1. Checking Account: ${checkingAccountId} (Balance: $1,800,500.00)`);
-        console.log(`  2. Savings Account: ${savingsAccountId} (Balance: $212,071,800.00)`);
-        console.log(`\nTotal Transactions Created: ${checkingTransactions.length + savingsTransactions.length}`);
+        console.log(`  1. Checking Account: ${checkingAccountId} (Balance: $390,000.00)`);
+        console.log(`\nTransactions Created with Dates:`);
+        checkingTransactions.forEach((trans, index) => {
+            console.log(`  ${index + 1}. ${trans.description}: $${trans.amount.toLocaleString()} on ${trans.date.toLocaleDateString()}`);
+        });
         
         process.exit(0);
     } catch (error) {
